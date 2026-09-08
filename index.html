@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>DispatchAI</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #12172e; color: #e8ecf5; margin: 0; padding: 2rem; }
+  h1 { color: #f5822b; }
+  .card { background: #1e2749; border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 1rem; }
+  button { background: #f5822b; color: #12172e; border: none; padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+  button:hover { opacity: 0.9; }
+  select { padding: 0.4rem; border-radius: 6px; margin-right: 0.5rem; }
+  .score-bar { background: #3a4472; border-radius: 4px; height: 8px; overflow: hidden; }
+  .score-fill { background: #f5822b; height: 100%; }
+  .status-on_time { color: #6ee7a0; }
+  .status-delayed { color: #f5c542; }
+  .status-at_pickup { color: #6ee7a0; }
+  .status-exception { color: #f56b6b; font-weight: 600; }
+  .muted { color: #9aa5c9; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+const API = "http://localhost:8000";
+
+function App() {
+  const [loads, setLoads] = useState([]);
+  const [selectedLoad, setSelectedLoad] = useState("");
+  const [matches, setMatches] = useState([]);
+  const [checkins, setCheckins] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API}/loads`).then(r => r.json()).then(data => {
+      setLoads(data);
+      if (data.length) setSelectedLoad(data[0].load_id);
+    }).catch(() => {});
+  }, []);
+
+  const runMatch = () => {
+    if (!selectedLoad) return;
+    setLoading(true);
+    fetch(`${API}/match/${selectedLoad}`, { method: "POST" })
+      .then(r => r.json())
+      .then(setMatches)
+      .finally(() => setLoading(false));
+  };
+
+  const runCheckin = (carrierId) => {
+    fetch(`${API}/checkin/${carrierId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ load_id: selectedLoad }),
+    })
+      .then(r => r.json())
+      .then(res => setCheckins(prev => [res, ...prev]));
+  };
+
+  return (
+    <div>
+      <h1>DispatchAI</h1>
+      <p className="muted">Freight dispatch, on autopilot — pick a load, get ranked carrier matches, simulate a check-in.</p>
+
+      <div className="card">
+        <select value={selectedLoad} onChange={e => setSelectedLoad(e.target.value)}>
+          {loads.map(l => (
+            <option key={l.load_id} value={l.load_id}>
+              {l.load_id}: {l.origin} → {l.destination} ({l.equipment_type}, ${l.target_rate})
+            </option>
+          ))}
+        </select>
+        <button onClick={runMatch}>{loading ? "Matching..." : "Find best carriers"}</button>
+      </div>
+
+      {matches.length > 0 && (
+        <div className="card">
+          <h3>Ranked matches</h3>
+          {matches.map(m => (
+            <div key={m.carrier_id} style={{ marginBottom: "1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <strong>{m.carrier_name}</strong>
+                <span>{(m.score * 100).toFixed(0)}%</span>
+              </div>
+              <div className="score-bar"><div className="score-fill" style={{ width: `${m.score * 100}%` }}></div></div>
+              <div className="muted">{m.reason}</div>
+              <button style={{ marginTop: "0.4rem" }} onClick={() => runCheckin(m.carrier_id)}>Simulate check-in</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {checkins.length > 0 && (
+        <div className="card">
+          <h3>Check-in log</h3>
+          {checkins.map((c, i) => (
+            <div key={i} style={{ marginBottom: "0.6rem" }}>
+              <strong>{c.carrier_name}</strong> — <span className={`status-${c.status}`}>{c.status}</span>
+              <div className="muted">{c.message}</div>
+              {c.needs_human && <div style={{ color: "#f56b6b" }}>⚠ needs dispatcher attention</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
